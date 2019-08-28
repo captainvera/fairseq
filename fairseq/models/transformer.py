@@ -375,7 +375,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         else:
             self.layer_norm = None
 
-    def forward(self, prev_output_tokens, encoder_out=None, incremental_state=None, **unused):
+    def forward(self, prev_output_tokens, encoder_out=None, incremental_state=None, tlm=True, l2r=True, r2l=True, **unused):
         """
         Args:
             prev_output_tokens (LongTensor): previous decoder outputs of shape
@@ -390,11 +390,20 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 - the decoder's output of shape `(batch, tgt_len, vocab)`
                 - a dictionary with any model-specific outputs
         """
-        x, extra = self.extract_features(prev_output_tokens, encoder_out, incremental_state)
-        x = self.output_layer(x)
-        return x, extra
+        if l2r or r2l or tlm:
+            assert(incremental_state is None)
+            assert(prev_output_tokens is not None)
+        else:
+            assert(incremental_state is not None)
+            assert(prev_output_tokens is None)
+        returns = {}
+        if l2r:
+            x_l2r, state_l2r = self.extract_features(prev_output_tokens, encoder_out, incremental_state, mode='l2r')
+            returns['l2r'] = (x_l2r, self.output_layer(x_l2r), state_l2r)
 
-    def extract_features(self, prev_output_tokens, encoder_out=None, incremental_state=None, **unused):
+        return returns
+
+    def extract_features(self, prev_output_tokens, encoder_out=None, incremental_state=None, mode=None, **unused):
         """
         Similar to *forward* but only return features.
 
@@ -405,7 +414,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         """
         # embed positions
         positions = self.embed_positions(
-            prev_output_tokens,
+            prev_output_tokens,pp
             incremental_state=incremental_state,
         ) if self.embed_positions is not None else None
 
@@ -432,12 +441,17 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         # decoder layers
         for layer in self.layers:
+            attn_mask = None
+            if mode == 'l2r':
+                self_attn_mask = self.buffered_future_mask(x)
+            if mode == 'r2l':
+                self._attn_mask = self.buffered_past_mask(x)
             x, attn = layer(
                 x,
                 encoder_out['encoder_out'] if encoder_out is not None else None,
                 encoder_out['encoder_padding_mask'] if encoder_out is not None else None,
                 incremental_state,
-                self_attn_mask=self.buffered_future_mask(x) if incremental_state is None else None,
+                self_attn_mask=self_attn_mask,
             )
             inner_states.append(x)
 
@@ -474,6 +488,9 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if not hasattr(self, '_future_mask') or self._future_mask is None or self._future_mask.device != tensor.device or self._future_mask.size(0) < dim:
             self._future_mask = torch.triu(utils.fill_with_neg_inf(tensor.new(dim, dim)), 1)
         return self._future_mask[:dim, :dim]
+
+    def buffered_past_mask(self, tensor):
+        return self.buffered_future_mask.T()
 
     def upgrade_state_dict_named(self, state_dict, name):
         """Upgrade a (possibly old) state dict for new versions of fairseq."""

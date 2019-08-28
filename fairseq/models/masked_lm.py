@@ -294,7 +294,7 @@ def base_architecture(args):
     args.encoder_normalize_before = getattr(args, 'encoder_normalize_before', False)
 
 
-@register_model_architecture('masked_lm', 'bert_base')
+@register_model_architecture('masked_lm', /Users/sony/mtm/fairseq/fairseq/criterions 'bert_base')
 def bert_base_architecture(args):
     args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 768)
     args.share_encoder_input_output_embed = getattr(
